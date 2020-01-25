@@ -1,0 +1,720 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'POPBLMACC2020'
+Parameters:
+  KeyName:
+    Description: Key Pair name
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: POPBLMACC2020
+  GitUsername:
+    Description: Git User name
+    Type: String
+    Default: gitUser
+  GitEmail:
+    Description: Git email
+    Type: String
+    Default: gitUser@alumni.mondragon.edu
+  GitPassword:
+    Description: Git password
+    Type: String
+    Default: gitUser
+    NoEcho: 'true'
+  IAMRole:
+    Description: EC2 attached IAM role
+    Type: String
+    Default: Cloudwatch_Logs
+    ConstraintDescription: must be an existing IAM role which will be attached to EC2 instance.
+Mappings:
+  EC2RegionMap:
+    ap-northeast-1:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-cbf90ecb
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-03cf3903
+    ap-southeast-1:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-68d8e93a
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-b49dace6
+    ap-southeast-2:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-fd9cecc7
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-e7ee9edd
+    eu-central-1:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-026d3b3672c6e7b66
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-46073a5b
+    eu-west-1:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-0862aabda3fb488b5
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-6975eb1e
+    sa-east-1:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-b52890a8
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-fbfa41e6
+    us-east-1:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-035b3c7efe6d061d5
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-303b1458
+    us-west-1:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-0fcdcdb074d2bac5f
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-7da94839
+    us-west-2:
+      AmazonLinuxAMIHVMEBSBacked64bit: ami-0f2176987ee50226e
+      AmazonLinuxNATAMIHVMEBSBacked64bit: ami-69ae8259
+Resources:
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: My security group
+      VpcId: !Ref VPC
+  SecurityGroupIngress:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      IpProtocol: '-1'
+      FromPort: '-1'
+      ToPort: '-1'
+      CidrIp: 0.0.0.0/0
+      GroupId: !Ref SecurityGroup
+  SecurityGroupEgress:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      IpProtocol: '-1'
+      FromPort: '-1'
+      ToPort: '-1'
+      CidrIp: 0.0.0.0/0
+      GroupId: !Ref SecurityGroup
+  PrivateSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription:  Bastion can access private through SSH, HAProxy can access through TCP, any connections outwards
+      VpcId: !Ref VPC
+  TCP8080HAProxy:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      IpProtocol: 'tcp'
+      FromPort: '8080'
+      ToPort: '8080'
+      CidrIp: 172.16.1.12/32
+      GroupId: !Ref PrivateSecurityGroup
+  TCP8080Sub:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      IpProtocol: 'tcp'
+      FromPort: '8080'
+      ToPort: '8080'
+      CidrIp: 172.16.2.0/24
+      GroupId: !Ref PrivateSecurityGroup
+  TCP22Bastion:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      IpProtocol: 'tcp'
+      FromPort: '22'
+      ToPort: '22'
+      CidrIp: 172.16.1.13/32
+      GroupId: !Ref PrivateSecurityGroup
+  DefaultRule:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      IpProtocol: '-1'
+      FromPort: '-1'
+      ToPort: '-1'
+      CidrIp: 0.0.0.0/0
+      GroupId: !Ref PrivateSecurityGroup
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 172.16.0.0/16
+      EnableDnsHostnames: 'true'
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties: {}
+  VPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  SubnetPub1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select 
+        - '0'
+        - !GetAZs ''
+      CidrBlock: 172.16.1.0/24
+      VpcId: !Ref VPC
+  RouteTablePublicApiGateway:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+  RouteTableAssociationPublicApiGateway:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SubnetPub1
+      RouteTableId: !Ref RouteTablePublicApiGateway
+  RoutePublicApiGatewayToInternet:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref RouteTablePublicApiGateway
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+    DependsOn: VPCGatewayAttachment
+  SubnetPub2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select 
+        - '0'
+        - !GetAZs ''
+      CidrBlock: 172.16.2.0/24
+      VpcId: !Ref VPC
+  RouteTablePublicHoneypot:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+  RouteTableAssociationPublicHoneypot:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SubnetPub2
+      RouteTableId: !Ref RouteTablePublicHoneypot
+  RoutePublicHoneypotToInternet:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref RouteTablePublicHoneypot
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+    DependsOn: VPCGatewayAttachment
+  SubnetPriv1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select
+        - '0'
+        - !GetAZs ''
+      CidrBlock: 172.16.3.0/24
+      VpcId: !Ref VPC
+  RouteTablePrivateMicroservices:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+  RouteTableAssociationPrivateMicroservices:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SubnetPriv1
+      RouteTableId: !Ref RouteTablePrivateMicroservices
+  RoutePrivateMicroservicesToInternet:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref RouteTablePrivateMicroservices
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref NAT
+  NAT:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap 
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxNATAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref SubnetPub1
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref SecurityGroup
+      SourceDestCheck: 'false'
+      Tags:
+        - Key: Name
+          Value: NAT
+        - Key: System
+          Value: popbl
+        - Key: Subnet
+          Value: s1
+      UserData: !Base64 
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash -ex
+            - '/opt/aws/bin/cfn-signal --stack '
+            - !Ref 'AWS::StackName'
+            - ' --resource NAT --region '
+            - !Ref 'AWS::Region'
+            - |+
+            
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT5M
+    DependsOn: VPCGatewayAttachment
+  HAProxy:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap 
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          PrivateIpAddress: '172.16.1.12'
+          SubnetId: !Ref SubnetPub1
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: HAProxy
+        - Key: Subnet
+          Value: SubnetPub1
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |
+              exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+            - |
+              sysctl kernel.hostname=HAProxy
+            - |
+              sudo yum update -y
+            - |
+              sudo yum install -y git
+            - |
+              sudo yum install -y docker
+            - |
+              sudo yum install -y awslogs
+            - |
+              sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
+            - |
+              sudo chmod +x /etc/awslogs/awslogs.conf
+            - |
+              sudo service awslogs start
+            - |
+              sudo service docker start
+            - |
+              sudo usermod -a -G docker ec2-user
+            - |
+              sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+            - |
+              sudo chmod +x /usr/local/bin/docker-compose
+            - |
+              git clone https://gitlab.danz.eus/mikel.amuchastegui/aasg1.git
+            - |
+              cd aasg1/
+            - |
+              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up
+    DependsOn: VPCGatewayAttachment
+  Bastion:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref SubnetPub1
+          DeviceIndex: '0'
+          PrivateIpAddress: '172.16.1.13'
+          GroupSet:
+            - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: Bastion
+        - Key: Subnet
+          Value: SubnetPub1
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |
+              exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+            - |
+              sysctl kernel.hostname=Bastion
+            - |
+              sudo yum update -y
+            - |
+              sudo yum install -y git
+            - |
+              sudo yum install -y docker
+            - |
+              sudo yum install -y awslogs
+            - |
+              sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
+            - |
+              sudo chmod +x /etc/awslogs/awslogs.conf
+            - |
+              sudo service awslogs start
+    DependsOn: VPCGatewayAttachment
+  Visualization:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.medium
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref SubnetPub1
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: Visualization
+        - Key: Subnet
+          Value: SubnetPub1
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |
+              exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+            - |
+              sysctl kernel.hostname=Visualization
+            - |
+              sudo yum update -y
+            - |
+              sudo yum install -y git
+            - |
+              sudo yum install -y docker
+            - |
+              sudo yum install -y awslogs
+            - |
+              sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
+            - |
+              sudo chmod +x /etc/awslogs/awslogs.conf
+            - |
+              sudo service awslogs start
+            - |
+              sudo service docker start
+            - |
+              sudo usermod -a -G docker ec2-user
+            - |
+              sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+            - |
+              sudo chmod +x /usr/local/bin/docker-compose
+            - |
+              git clone https://gitlab.danz.eus/mikel.amuchastegui/elk_stack.git
+            - |
+              cd elk_stack/
+            - |
+              sudo chmod 0444 elastic_certificates/elastic.*
+            - |
+              sudo chmod 0444 elastic_certificates/ca/ca.crt
+            - |
+              sudo chmod 0444 kibana_certificates/kibana.*
+            - |
+              sudo chmod 0444 kibana_certificates/ca/ca.crt
+            - |
+              /usr/local/bin/docker-compose -f /elk_stack/docker-compose.yml up -d elastic
+            - |
+              sleep 60
+            - |
+              sudo curl -k -u elastic:elastic -XPUT -H 'Content-Type: application/json' 'https://localhost:9200/_xpack/security/user/kibana/_password' -d '{"password":"kibana"}'
+            - |
+              /usr/local/bin/docker-compose -f /elk_stack/docker-compose.yml up -d kibana
+    DependsOn: VPCGatewayAttachment
+  Microservice:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap 
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.medium
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'false'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref SubnetPriv1
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref PrivateSecurityGroup
+      Tags:
+        - Key: Name
+          Value: Microservice
+        - Key: Subnet
+          Value: SubnetPriv1
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |
+              exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+            - |
+              sysctl kernel.hostname=Microservice
+            - |
+              sudo yum update -y
+            - |
+              sudo yum install -y git
+            - |
+              sudo yum install -y docker
+            - |
+              sudo yum install -y awslogs
+            - |
+              sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
+            - |
+              sudo chmod +x /etc/awslogs/awslogs.conf
+            - |
+              sudo service awslogs start
+            - |
+              sudo service docker start
+            - |
+              sudo usermod -a -G docker ec2-user
+            - |
+              sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+            - |
+              sudo chmod +x /usr/local/bin/docker-compose
+            - |
+              git clone https://gitlab.danz.eus/mikel.amuchastegui/aasg1.git
+            - |
+              cd aasg1/
+            - |
+              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up
+    DependsOn: VPCGatewayAttachment
+  Rabbit:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap 
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'false'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref SubnetPriv1
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref PrivateSecurityGroup
+      Tags:
+        - Key: Name
+          Value: Rabbit
+        - Key: Subnet
+          Value: SubnetPriv1
+    DependsOn: VPCGatewayAttachment
+  Consul:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap 
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'false'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref SubnetPriv1
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref PrivateSecurityGroup
+      Tags:
+        - Key: Name
+          Value: Consul
+        - Key: Subnet
+          Value: SubnetPriv1
+    DependsOn: VPCGatewayAttachment
+  Honeypot:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap 
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.medium
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref SubnetPub2
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: Honeypot
+        - Key: Subnet
+          Value: SubnetPub2
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |
+              exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+            - |
+              sysctl kernel.hostname=Honeypot
+            - |
+              sudo yum update -y
+            - |
+              sudo yum install -y git
+            - |
+              sudo yum install -y docker
+            - |
+              sudo yum install -y awslogs
+            - |
+              sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
+            - |
+              sudo chmod +x /etc/awslogs/awslogs.conf
+            - |
+              sudo service awslogs start
+            - |
+              sudo service docker start
+            - |
+              sudo usermod -a -G docker ec2-user
+            - |
+              sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+            - |
+              sudo chmod +x /usr/local/bin/docker-compose
+            - |
+              git clone https://github.com/huarteto/honeys.git
+            - |
+              cd honeys/
+            - |
+              sudo chmod 0444 filebeat_certificates/filebeat.crt
+            - |
+              sudo chmod 0444 filebeat_certificates/ca/ca.crt
+            - |
+              sudo chmod 0444 metricbeat_certificates/metricbeat.crt
+            - |
+              sudo chmod 0444 metricbeat_certificates/ca/ca.crt
+            - |
+              sudo chmod 0444 packetbeat_certificates/packetbeat.crt
+            - |
+              sudo chmod 0444 packetbeat_certificates/ca/ca.crt
+            - |
+              sleep 60
+            - |
+              /usr/local/bin/docker-compose -f /honeys/docker-compose.yml up -d
+    DependsOn: VPCGatewayAttachment
+  HoneyTrampa:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap
+        - EC2RegionMap
+        - !Ref 'AWS::Region'
+        - AmazonLinuxAMIHVMEBSBacked64bit
+      IamInstanceProfile:
+        Ref: IAMRole
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref SubnetPub1
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: HoneyTrampa
+        - Key: Subnet
+          Value: SubnetPub2
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |
+              exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+            - |
+              sysctl kernel.hostname=HaProxy
+            - |
+              sudo yum update -y
+            - |
+              sudo yum install -y git
+            - |
+              sudo yum install -y docker
+            - |
+              sudo yum install -y awslogs
+            - |
+              sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
+            - |
+              sudo chmod +x /etc/awslogs/awslogs.conf
+            - |
+              sudo service awslogs start
+            - |
+              sudo service docker start
+            - |
+              sudo usermod -a -G docker ec2-user
+            - |
+              sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+            - |
+              sudo chmod +x /usr/local/bin/docker-compose
+            - |
+              git clone https://gitlab.danz.eus/xabier.gandiaga/aasg1.git
+            - |
+              cd aasg1/
+            - |
+              sudo chmod 0444 flask_app/payment/security/rabbitmq/aas_payment_rbt.*
+            - |
+              sudo chmod 0444 flask_app/payment/security/api/aas_payment_ssl.*
+            - |
+              sudo chmod 0444 flask_app/machine/security/rabbitmq/aas_machine_rbt.*
+            - |
+              sudo chmod 0444 flask_app/machine/security/api/aas_machine_ssl.*
+            - |
+              sudo chmod 0444 flask_app/delivery/security/rabbitmq/aas_delivery_rbt.*
+            - |
+              sudo chmod 0444 flask_app/delivery/security/api/aas_delivery_ssl.*
+            - |
+              sudo chmod 0444 flask_app/order/security/rabbitmq/aas_order_rbt.*
+            - |
+              sudo chmod 0444 flask_app/order/security/api/aas_order_ssl.*
+            - |
+              sudo chmod 0444 flask_app/auth/security/rabbitmq/aas_auth_rbt.*
+            - |
+              sudo chmod 0444 flask_app/auth/security/api/aas_auth_ssl.*
+            - |
+              sudo chmod 0444 flask_app/warehouse/security/rabbitmq/aas_warehouse_rbt.*
+            - |
+              sudo chmod 0444 flask_app/warehouse/security/api/aas_warehouse_ssl.*
+            - |
+              sudo chmod 0444 flask_app/log_service/security/rabbitmq/aas_log_service_rbt.*
+            - |
+              sudo chmod 0444 flask_app/log_service/security/api/aas_log_service_ssl.*
+            - |
+              sudo chmod 0444 rabbitmq/aas_rabbitmq_ssl.*
+            - |
+              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up
+            - |
+              cd ..
+            - |
+              git clone https://gitlab.danz.eus/mikel.amuchastegui/beats_stack.git
+            - |
+              cd Beats_Stack/
+            - |
+              sudo chmod 0444 filebeat_certificates/filebeat.crt
+            - |
+              sudo chmod 0444 filebeat_certificates/ca/ca.crt
+            - |
+              sudo chmod 0444 metricbeat_certificates/metricbeat.crt
+            - |
+              sudo chmod 0444 metricbeat_certificates/ca/ca.crt
+            - |
+              /usr/local/bin/docker-compose -f /Beats_Stack/docker-compose.yml up
+    DependsOn: VPCGatewayAttachment
+  IPAssoc:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref Visualization
+      EIP: 52.22.153.155
+ 
