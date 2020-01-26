@@ -588,6 +588,8 @@ Resources:
               sudo chmod +x /etc/awslogs/awslogs.conf
             - |
               sudo service awslogs start
+            - |
+              /usr/local/bin/docker-compose -f /home/ec2-user/vault_stack/docker-compose.yml up -d
     DependsOn: VPCGatewayAttachment
   Microservice:
     Type: 'AWS::EC2::Instance'
