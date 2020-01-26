@@ -46,6 +46,7 @@ Mappings:
     us-east-1:
       AmazonLinuxAMIHVMEBSBacked64bit: ami-035b3c7efe6d061d5
       AmazonLinuxNATAMIHVMEBSBacked64bit: ami-303b1458
+      CustomVaultAMI: ami-05e06b351d3a51c6c
     us-west-1:
       AmazonLinuxAMIHVMEBSBacked64bit: ami-0fcdcdb074d2bac5f
       AmazonLinuxNATAMIHVMEBSBacked64bit: ami-7da94839
@@ -95,6 +96,14 @@ Resources:
       ToPort: '65535'
       CidrIp: 172.16.1.12/32
       GroupId: !Ref PrivateSecurityGroup
+  ICMPHAProxy:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      IpProtocol: 'icmp'
+      FromPort: '-1'
+      ToPort: '-1'
+      CidrIp: 172.16.1.12/32
+      GroupId: !Ref PrivateSecurityGroup
   TCPVault:
     Type: 'AWS::EC2::SecurityGroupIngress'
     Properties:
@@ -103,10 +112,10 @@ Resources:
       ToPort: '65535'
       CidrIp: 172.16.1.14/32
       GroupId: !Ref PrivateSecurityGroup
-  TCPFromSubnet:
+  AllFromSubnet:
     Type: 'AWS::EC2::SecurityGroupIngress'
     Properties:
-      IpProtocol: 'tcp'
+      IpProtocol: '-1'
       FromPort: '0'
       ToPort: '65535'
       CidrIp: 172.16.2.0/24
@@ -118,6 +127,14 @@ Resources:
       FromPort: '22'
       ToPort: '22'
       CidrIp: 172.16.1.13/32
+      GroupId: !Ref PrivateSecurityGroup
+  TCPFromNAT:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      IpProtocol: 'tcp'
+      FromPort: '0'
+      ToPort: '65535'
+      CidrIp: 172.16.1.20/32
       GroupId: !Ref PrivateSecurityGroup
   DefaultRule:
     Type: 'AWS::EC2::SecurityGroupEgress'
@@ -196,7 +213,7 @@ Resources:
       IpProtocol: 'tcp'
       FromPort: '9200'
       ToPort: '9200'
-      CidrIp: 172.16.0.0/16
+      CidrIp: 0.0.0.0/0
       GroupId: !Ref VisualizationSecurity
   22ForVisualization:
     Type: 'AWS::EC2::SecurityGroupIngress'
@@ -305,6 +322,7 @@ Resources:
         - AssociatePublicIpAddress: 'true'
           DeleteOnTermination: 'true'
           SubnetId: !Ref SubnetPub1
+          PrivateIpAddress: '172.16.1.20'
           DeviceIndex: '0'
           GroupSet:
             - !Ref SecurityGroup
@@ -387,11 +405,11 @@ Resources:
             - |
               sudo chmod +x /usr/local/bin/docker-compose
             - |
-              git clone --single-branch --branch cloudformation https://gitlab.danz.eus/mikel.amuchastegui/aasg1.git
+              sudo git clone https://gitlab.danz.eus/mikel.amuchastegui/aas_cloud.git  
             - |
-              cd aasg1/
+              cd aas_cloud/
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up haproxy
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up haproxy
     DependsOn: VPCGatewayAttachment
   Bastion:
     Type: 'AWS::EC2::Instance'
@@ -440,7 +458,10 @@ Resources:
               sudo chmod +x /etc/awslogs/awslogs.conf
             - |
               sudo service awslogs start
-    DependsOn: VPCGatewayAttachment
+    DependsOn: 
+      - VPCGatewayAttachment
+      - SecurityGroup
+      - SubnetPub1
   Visualization:
     Type: 'AWS::EC2::Instance'
     Properties:
@@ -496,7 +517,7 @@ Resources:
             - |
               sudo chmod +x /usr/local/bin/docker-compose
             - |
-              git clone https://gitlab.danz.eus/mikel.amuchastegui/elk_stack.git
+              sudo git clone https://gitlab.danz.eus/mikel.amuchastegui/elk_stack.git
             - |
               cd elk_stack/
             - |
@@ -516,13 +537,13 @@ Resources:
             - |
               /usr/local/bin/docker-compose -f /elk_stack/docker-compose.yml up -d kibana
             - |
-              git clone https://github.com/xgandiaga/POPBL1-Dashboard
+              sudo git clone https://github.com/xgandiaga/POPBL1-Dashboard
             - |
               cd POPBL1-Dashboard/
             - |
               sudo docker image build -t interface .
             - |
-              sudo docker container run -p 8050:8050 -d interface
+              sudo docker container run -p 8050:8050 interface
     DependsOn: VPCGatewayAttachment
   Vault:
     Type: 'AWS::EC2::Instance'
@@ -580,7 +601,7 @@ Resources:
             - |
               sudo chmod +x /usr/local/bin/docker-compose
             - |
-              git clone https://gitlab.danz.eus/mikel.amuchastegui/vault_stack
+              sudo git clone https://gitlab.danz.eus/mikel.amuchastegui/vault_stack
             - |
               cd vault_stack/
             - |
@@ -593,6 +614,15 @@ Resources:
               sudo chmod 0444 vault_certs/vault_chain.*
             - |
               sudo chmod 0444 vault_certs/ca/*.*
+            - |
+              sudo chmod 0750 vault_stack.sh
+            - |
+              sudo chmod 0750 unseal.sh
+            - |
+              sudo chmod 0750 unseal.exp
+            - |
+              sudo sh vault_stack.sh
+
     DependsOn: VPCGatewayAttachment
   Microservice:
     Type: 'AWS::EC2::Instance'
@@ -609,6 +639,7 @@ Resources:
         - AssociatePublicIpAddress: 'false'
           DeleteOnTermination: 'true'
           SubnetId: !Ref SubnetPriv1
+          PrivateIpAddress: '172.16.3.27'
           DeviceIndex: '0'
           GroupSet:
             - !Ref PrivateSecurityGroup
@@ -649,29 +680,29 @@ Resources:
             - |
               sudo chmod +x /usr/local/bin/docker-compose
             - |
-              git clone --single-branch --branch cloudformation https://gitlab.danz.eus/mikel.amuchastegui/aasg1.git
+              sudo git clone https://gitlab.danz.eus/mikel.amuchastegui/aas_cloud.git  
             - |
-              cd aasg1/
+              cd aas_cloud/
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up order
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up -d order
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up delivery
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up -d delivery
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up warehouse
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up -d warehouse
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up auth
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up -d auth
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up payment
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up -d payment
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up machine
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up -d machine
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up log
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up -d log
             - |
               cd ..
             - |
-              git clone https://gitlab.danz.eus/mikel.amuchastegui/beats_stack.git
+              sudo git clone https://gitlab.danz.eus/mikel.amuchastegui/beats_stack.git
             - |
-              cd Beats_Stack/
+              cd beats_stack/
             - |
               sudo chmod 0444 filebeat_certificates/filebeat.crt
             - |
@@ -681,13 +712,9 @@ Resources:
             - |
               sudo chmod 0444 metricbeat_certificates/ca/ca.crt
             - |
-              /usr/local/bin/docker-compose -f /Beats_Stack/docker-compose.yml up
+              /usr/local/bin/docker-compose -f /beats_stack/docker-compose.yml up -d
     DependsOn: 
       - VPCGatewayAttachment
-      - Vault
-      - Rabbit
-      - Consul
-      - HAProxy
   Rabbit:
     Type: 'AWS::EC2::Instance'
     Properties:
@@ -697,7 +724,7 @@ Resources:
         - AmazonLinuxAMIHVMEBSBacked64bit
       IamInstanceProfile:
         Ref: IAMRole
-      InstanceType: t2.medium
+      InstanceType: t2.micro
       KeyName: !Ref KeyName
       NetworkInterfaces:
         - AssociatePublicIpAddress: 'false'
@@ -713,42 +740,42 @@ Resources:
         - Key: Subnet
           Value: SubnetPriv1
       UserData: !Base64
-      'Fn::Join':
-        - ''
-        - - |
-            #!/bin/bash
-          - |
-            exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
-          - |
-            sysctl kernel.hostname=Microservice
-          - |
-            sudo yum update -y
-          - |
-            sudo yum install -y git
-          - |
-            sudo yum install -y docker
-          - |
-            sudo yum install -y awslogs
-          - |
-            sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
-          - |
-            sudo chmod +x /etc/awslogs/awslogs.conf
-          - |
-            sudo service awslogs start
-          - |
-            sudo service docker start
-          - |
-            sudo usermod -a -G docker ec2-user
-          - |
-            sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
-          - |
-            sudo chmod +x /usr/local/bin/docker-compose
-          - |
-            git clone --single-branch --branch cloudformation https://gitlab.danz.eus/mikel.amuchastegui/aasg1.git              
-          - |
-            cd aasg1/
-          - |
-            /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up rabitmq
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |
+              exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+            - |
+              sysctl kernel.hostname=Rabbit
+            - |
+              sudo yum update -y
+            - |
+              sudo yum install -y git
+            - |
+              sudo yum install -y docker
+            - |
+              sudo yum install -y awslogs
+            - |
+              sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
+            - |
+              sudo chmod +x /etc/awslogs/awslogs.conf
+            - |
+              sudo service awslogs start
+            - |
+              sudo service docker start
+            - |
+              sudo usermod -a -G docker ec2-user
+            - |
+              sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+            - |
+              sudo chmod +x /usr/local/bin/docker-compose
+            - |
+              sudo git clone https://gitlab.danz.eus/mikel.amuchastegui/aas_cloud.git              
+            - |
+              cd aas_cloud/
+            - |
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up rabitmq
     DependsOn: VPCGatewayAttachment
   Consul:
     Type: 'AWS::EC2::Instance'
@@ -775,42 +802,42 @@ Resources:
         - Key: Subnet
           Value: SubnetPriv1
       UserData: !Base64
-      'Fn::Join':
-        - ''
-        - - |
-            #!/bin/bash
-          - |
-            exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
-          - |
-            sysctl kernel.hostname=Microservice
-          - |
-            sudo yum update -y
-          - |
-            sudo yum install -y git
-          - |
-            sudo yum install -y docker
-          - |
-            sudo yum install -y awslogs
-          - |
-            sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
-          - |
-            sudo chmod +x /etc/awslogs/awslogs.conf
-          - |
-            sudo service awslogs start
-          - |
-            sudo service docker start
-          - |
-            sudo usermod -a -G docker ec2-user
-          - |
-            sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
-          - |
-            sudo chmod +x /usr/local/bin/docker-compose
-          - |
-            git clone --single-branch --branch cloudformation https://gitlab.danz.eus/mikel.amuchastegui/aasg1.git              
-          - |
-            cd aasg1/
-          - |
-            /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up consul
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash
+            - |
+              exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
+            - |
+              sysctl kernel.hostname=Consul
+            - |
+              sudo yum update -y
+            - |
+              sudo yum install -y git
+            - |
+              sudo yum install -y docker
+            - |
+              sudo yum install -y awslogs
+            - |
+              sudo curl -L https://raw.githubusercontent.com/xgandiaga/POPBL1/master/awslogs.conf -o /etc/awslogs/awslogs.conf
+            - |
+              sudo chmod +x /etc/awslogs/awslogs.conf
+            - |
+              sudo service awslogs start
+            - |
+              sudo service docker start
+            - |
+              sudo usermod -a -G docker ec2-user
+            - |
+              sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+            - |
+              sudo chmod +x /usr/local/bin/docker-compose
+            - |
+              sudo git clone https://gitlab.danz.eus/mikel.amuchastegui/aas_cloud.git              
+            - |
+              cd aas_cloud/
+            - |
+              /usr/local/bin/docker-compose -f /aas_cloud/docker-compose.yml up consul
     DependsOn: VPCGatewayAttachment
   Honeypot:
     Type: 'AWS::EC2::Instance'
@@ -821,7 +848,7 @@ Resources:
         - AmazonLinuxAMIHVMEBSBacked64bit
       IamInstanceProfile:
         Ref: IAMRole
-      InstanceType: t2.medium
+      InstanceType: t2.micro
       KeyName: !Ref KeyName
       NetworkInterfaces:
         - AssociatePublicIpAddress: 'true'
@@ -867,7 +894,7 @@ Resources:
             - |
               sudo chmod +x /usr/local/bin/docker-compose
             - |
-              git clone https://github.com/huarteto/honeys.git
+              sudo git clone https://github.com/huarteto/honeys.git
             - |
               cd honeys/
             - |
@@ -885,10 +912,9 @@ Resources:
             - |
               sleep 60
             - |
-              /usr/local/bin/docker-compose -f /honeys/docker-compose.yml up -d
+              /usr/local/bin/docker-compose -f /honeys/docker-compose.yml up
     DependsOn: 
       - VPCGatewayAttachment
-      - Visualization
   HoneyTrampa:
     Type: 'AWS::EC2::Instance'
     Properties:
@@ -903,7 +929,7 @@ Resources:
       NetworkInterfaces:
         - AssociatePublicIpAddress: 'true'
           DeleteOnTermination: 'true'
-          SubnetId: !Ref SubnetPub1
+          SubnetId: !Ref SubnetPub2
           DeviceIndex: '0'
           GroupSet:
             - !Ref SecurityGroup
@@ -944,7 +970,7 @@ Resources:
             - |
               sudo chmod +x /usr/local/bin/docker-compose
             - |
-              git clone https://gitlab.danz.eus/xabier.gandiaga/aasg1.git
+              sudo git clone https://gitlab.danz.eus/xabier.gandiaga/aasg1.git
             - |
               cd aasg1/
             - |
@@ -978,11 +1004,11 @@ Resources:
             - |
               sudo chmod 0444 rabbitmq/aas_rabbitmq_ssl.*
             - |
-              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up
+              /usr/local/bin/docker-compose -f /aasg1/docker-compose.yml up -d
             - |
               cd ..
             - |
-              git clone https://gitlab.danz.eus/mikel.amuchastegui/beats_stack.git
+              sudo git clone https://gitlab.danz.eus/mikel.amuchastegui/beats_stack.git
             - |
               cd Beats_Stack/
             - |
@@ -994,10 +1020,9 @@ Resources:
             - |
               sudo chmod 0444 metricbeat_certificates/ca/ca.crt
             - |
-              /usr/local/bin/docker-compose -f /Beats_Stack/docker-compose.yml up
+              /usr/local/bin/docker-compose -f /Beats_Stack/docker-compose.yml up -d
     DependsOn: 
       - VPCGatewayAttachment
-      - Visualization
   IPAssocVisualization:
     Type: AWS::EC2::EIPAssociation
     Properties:
